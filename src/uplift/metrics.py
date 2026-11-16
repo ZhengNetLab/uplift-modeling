@@ -2,11 +2,20 @@
 import numpy as np
 
 
+def _order(score, seed=0):
+    """Indizes absteigend nach Score; Gleichstände zufällig (reproduzierbar) aufgelöst.
+    Ohne das Mischen entscheidet bei gleichem Score die Zeilenposition – und die
+    Zeilenreihenfolge im Criteo-Datensatz hängt stark mit treatment und visit zusammen."""
+    score = np.asarray(score)
+    perm = np.random.default_rng(seed).permutation(len(score))
+    return perm[np.argsort(-score[perm], kind="stable")]
+
+
 def _cumulative(y, w, score, n_points=1000):
     """Absteigend nach Score sortieren, kumulierte Größen an n_points Stellen zurückgeben."""
     y = np.asarray(y, dtype=np.float64)
     w = np.asarray(w, dtype=np.float64)
-    order = np.argsort(-np.asarray(score), kind="stable")
+    order = _order(score)
     y, w = y[order], w[order]
     n_t, n_c = np.cumsum(w), np.cumsum(1 - w)
     y_t, y_c = np.cumsum(y * w), np.cumsum(y * (1 - w))
@@ -52,7 +61,7 @@ def auuc(y, w, score, n_points=1000):
 def uplift_at_k(y, w, score, k=0.3):
     """Rate_T − Rate_C unter den Top-k (Anteil) nach Score."""
     y, w, score = np.asarray(y), np.asarray(w), np.asarray(score)
-    top = np.argsort(-score, kind="stable")[: int(np.ceil(k * len(y)))]
+    top = _order(score)[: int(np.ceil(k * len(y)))]
     yt, wt = y[top], w[top]
     return yt[wt == 1].mean() - yt[wt == 0].mean()
 
