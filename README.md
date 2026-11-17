@@ -1,6 +1,6 @@
 # Uplift-Modellierung: Wen soll eine Werbekampagne ansprechen?
 
-**Kurzfassung:** Auf 14 Mio. Nutzern des Criteo-Uplift-Datensatzes erreichen Uplift-Modelle mit den besten 10 % der Zielgruppe 60 – 63 % aller zusätzlichen Visits. Ein klassisches Response-Modell („wer kommt am wahrscheinlichsten?“) erreicht mit demselben Budget knapp 50 %. Der Vorsprung ist statistisch gesichert, aber klein, und vier unterschiedliche Uplift-Verfahren liegen gleichauf.
+**Kurzfassung:** Auf 14 Mio. Nutzern des Criteo-Uplift-Datensatzes finden Uplift-Modelle die Nutzer, die *wegen* der Werbung kommen. Mit den besten 10 % der Zielgruppe erreicht der S-Learner 77 % aller zusätzlichen Visits, ein klassisches Response-Modell („wer kommt am wahrscheinlichsten?“) 66 %. Unter beispielhaften Kosten lohnt es sich nicht, alle Nutzer anzusprechen (−190 € pro 1 Mio. Nutzer); die Regel „ansprechen, wenn vorhergesagter Uplift × Wert > Kosten“ wählt 15 % aus und erzielt +2.700 €. Der Vorsprung gegenüber dem Response-Modell ist statistisch gesichert, aber klein, und wächst, je knapper das Budget ist.
 
 ![Qini-Kurven mit 95%-Bootstrap-Band](reports/figures/qini_bootstrap.png)
 
@@ -46,16 +46,17 @@ Zielgröße ist `visit`. Conversions sind zu selten (nur 4.063 in der Kontrollgr
 |---|---|---|
 | Differenz der Mittelwerte | 1,03 Pp. | 1,01 – 1,06 |
 | Regressionsadjustiert (Lin 2013, alle 12 Merkmale) | 0,77 Pp. | 0,75 – 0,80 |
+| Inverse Propensity-Gewichtung (IPW, Testset) | 0,76 Pp. | – |
 | Innerhalb von 100 Grundraten-Gruppen (Testset) | 0,66 Pp. | – |
 | Mittlere Vorhersage der Uplift-Modelle | 0,65 – 0,74 Pp. | – |
 
-Die adjustierten Werte und die Modelle stimmen überein. Die Zeilenreihenfolge der Rohdatei enthält Blöcke mit 0 %, 27 % oder 100 % Treatment. Das passt dazu, dass die zusammengeführten Tests unterschiedliche Treatment-Anteile hatten; innerhalb eines Tests ist die Zuteilung zufällig, im gepoolten Datensatz nur bedingt auf die Merkmale. **Als Hauptschätzer dient daher der adjustierte ATE von 0,77 Pp.** (relativer Lift ≈ 20 % statt der naiven 27 %).
+Die adjustierten Werte und die Modelle stimmen überein. Die Zeilenreihenfolge der Rohdatei enthält Blöcke mit 0 %, 27 % oder 100 % Treatment. Das passt dazu, dass die zusammengeführten Tests unterschiedliche Treatment-Anteile hatten; innerhalb eines Tests ist die Zuteilung zufällig, im gepoolten Datensatz nur bedingt auf die Merkmale. **Als Hauptschätzer dient daher der adjustierte ATE von 0,77 Pp.** (relativer Lift ≈ 20 % statt der naiven 27 %). Alle Geldbeträge in Abschnitt 4 sind mit IPW geschätzt.
 
 **Effekt auf tatsächlich exponierte Nutzer** ([Notebook 02](notebooks/02_ate_iv.ipynb)): In der Kontrollgruppe sieht niemand die Anzeige (einseitige Non-Compliance). Mit dem Treatment als Instrument für `exposure` (Wald-/Bloom-Schätzer) ergibt sich auf Basis der naiven ITT ein Effekt von 28,7 Pp. (95%-KI 27,9 – 29,5). Mit der adjustierten ITT sind es grob 21 Pp. Die Werbung wirkt also stark bei den wenigen, die sie sehen. Für die Budgetplanung zählt trotzdem die ITT, denn gesteuert wird die Zuteilung, nicht das Sehen.
 
 ## 3. Methoden
 
-Aufteilung 60/20/20 (Train/Validierung/Test), geschichtet nach Treatment × Visit. Alle Modelle werden auf demselben Testset (2,8 Mio. Nutzer) verglichen; Hyperparameter werden nur auf dem Validierungsset gewählt. Basismodell ist überall LightGBM.
+Aufteilung 60/20/20 (Train/Validierung/Test), geschichtet nach Treatment × Visit. Alle Modelle werden auf demselben Testset (2,8 Mio. Nutzer) verglichen; Hyperparameter werden nur auf dem Validierungsset gewählt. Basismodell ist überall LightGBM ([`src/uplift/models.py`](src/uplift/models.py)).
 
 | Modell | Idee | Warum hier |
 |---|---|---|
@@ -67,12 +68,14 @@ Aufteilung 60/20/20 (Train/Validierung/Test), geschichtet nach Treatment × Visi
 | DR-Learner (EconML) | doppelt robustes Pseudo-Outcome, Cross-Fitting | robust, falls Outcome- oder Propensity-Modell falsch ist; 2 Mio. Teilstichprobe |
 | Causal Forest (EconML) | Wald, der nach Effektunterschieden teilt | liefert Konfidenzintervalle pro Nutzer; 1 Mio. Teilstichprobe |
 
-**Evaluation** ([`src/uplift/metrics.py`](src/uplift/metrics.py)):
+**Evaluation** ([`src/uplift/metrics.py`](src/uplift/metrics.py), [`src/uplift/policy.py`](src/uplift/policy.py)):
 
 - **Qini-AUC:** Fläche zwischen Qini-Kurve und Zufallsgerade, normiert mit der Gesamtzahl zusätzlicher Visits. 0 = zufällig, größer = besser.
 - **Uplift@k:** beobachtete Differenz der Visit-Raten (Treatment − Kontrolle) unter den Top-k % nach Score.
 - **Bootstrap:** 200 gepaarte Poisson-Bootstrap-Runden auf dem Testset; alle Modelle sehen in jeder Runde dieselbe Stichprobe, sodass Modelldifferenzen direkt Intervalle bekommen.
 - **Kalibrierung:** 10 gleich große Gruppen nach vorhergesagtem Uplift, vorhergesagt vs. beobachtet.
+- **Budget und Gewinn:** zusätzliche Visits einer ausgewählten Gruppe per inverser Propensity-Gewichtung (IPW), damit absolute Zahlen nicht durch den schwankenden Treatment-Anteil verzerrt sind.
+- **Effekttreiber:** SHAP-Werte eines Surrogat-Modells, das die Vorhersagen des jeweiligen Modells nachlernt (R² ≥ 0,985 auf ungesehenen Nutzern).
 - Gleichstände im Score werden zufällig aufgelöst, weil die Zeilenreihenfolge der Datei mit Treatment und Visit zusammenhängt.
 
 ## 4. Ergebnisse
@@ -94,16 +97,6 @@ Aufteilung 60/20/20 (Train/Validierung/Test), geschichtet nach Treatment × Visi
 - **Der T-Learner fällt ab:** Sein Kontrollmodell lernt aus nur 1,3 Mio. Nutzern; die Differenz zweier unabhängig verrauschter Modelle verschlechtert die Rangfolge.
 - **Der Causal Forest erreicht dasselbe Niveau mit einem Achtel der Trainingsdaten.**
 
-### Was das für die Ausspielung bedeutet
-
-| Angesprochener Anteil | Anteil aller zusätzlichen Visits: Response | Uplift-Modelle |
-|---|---|---|
-| Top 10 % | 50 % | 60 – 63 % |
-| Top 20 % | 73 % | 74 – 77 % |
-| Top 30 % | 84 % | 84 – 85 % |
-
-Der Vorteil der Uplift-Modelle liegt vor allem bei **kleinen Budgets**. Unter den Top 5 % erhöht die Werbung die Visit-Rate laut Uplift-Modellen um 9,0 – 9,3 Pp., laut Response-Ranking nur um 5,4 Pp. Ab etwa 20 % der Zielgruppe sind die Unterschiede verschwunden. Grund: Hohe Visit-Wahrscheinlichkeit und hoher Uplift überschneiden sich in diesem Datensatz stark (Rangkorrelation Response vs. S-Learner 0,90).
-
 ### Kalibrierung
 
 ![Kalibrierung nach Dezilen](reports/figures/calibration.png)
@@ -113,17 +106,77 @@ Der Vorteil der Uplift-Modelle liegt vor allem bei **kleinen Budgets**. Unter de
 - **Der T-Learner** sagt für die unterste Gruppe −0,6 Pp. vorher, beobachtet sind +0,6 Pp.
 - Für eine Kosten-Nutzen-Regel („Uplift × Wert > Kosten“) zählen absolute Werte, daher ist dafür ein gut kalibriertes Modell zu bevorzugen.
 
-### Noch offen
+### Budget: Wie viel Wirkung bleibt bei kleinerer Zielgruppe?
 
-Budgetkurve und Sensitivitätsanalyse zum Kosten-Wert-Verhältnis (Tag 12) sowie SHAP-Analyse der Effekttreiber (Tag 13).
+Anteil aller zusätzlichen Visits (IPW-geschätzt; 100 % = alle ansprechen):
+
+| Angesprochener Anteil | Zufall | Response | S-Learner | Causal Forest |
+|---|---|---|---|---|
+| Top 5 % | 3 % | 39 % | 60 % | 59 % |
+| Top 10 % | 10 % | 66 % | 77 % | 75 % |
+| Top 20 % | 20 % | 87 % | 90 % | 85 % |
+| Top 30 % | 28 % | 92 % | 93 % | 93 % |
+
+Der Vorteil der Uplift-Modelle liegt bei **kleinen Budgets**. Ab etwa 20 % der Zielgruppe sind die Unterschiede verschwunden: Hohe Visit-Wahrscheinlichkeit und hoher Uplift überschneiden sich in diesem Datensatz stark (Rangkorrelation Response vs. S-Learner 0,90).
+
+### Ausspielungsregel und Gewinn
+
+Beispielhafte Annahmen: Ein zusätzlicher Visit ist **0,50 €** wert, einen Nutzer anzusprechen kostet **0,004 €** (≈ 4 € pro 1.000 Nutzer). Regel: ansprechen, wenn vorhergesagter Uplift × 0,50 € > 0,004 €, also Uplift > 0,8 Pp. Die Schwelle liegt knapp über dem durchschnittlichen Effekt (0,76 Pp.), sodass sich „alle ansprechen“ gerade nicht mehr lohnt.
+
+| Strategie (pro 1 Mio. Nutzer) | angesprochen | zusätzliche Visits | Gewinn |
+|---|---|---|---|
+| Niemanden ansprechen | 0 % | 0 | 0 € |
+| Alle ansprechen | 100 % | 7.622 | −189 € |
+| **Regel mit S-Learner** | 14,6 % | 6.612 | **+2.723 €** |
+| Regel mit Causal Forest | 16,4 % | 6.396 | +2.541 € |
+| Response-Modell, bester Anteil im Nachhinein¹ | 19,6 % | 6.639 | +2.535 € |
+| S-Learner, bester Anteil im Nachhinein¹ | 14,1 % | 6.611 | +2.742 € |
+
+¹ auf dem Testset nachträglich gewählt, also zu optimistisch. Das Response-Modell sagt keinen Uplift vorher und kann die Kosten-Nutzen-Regel nicht direkt anwenden.
+
+![Gewinnkurve](reports/figures/profit_curve.png)
+
+- **Mit 15 % der Zielgruppe bleiben 87 % der zusätzlichen Visits**, aus einem Verlust wird ein Gewinn.
+- **Die Regel trifft fast das Optimum:** Sie wird vorab festgelegt und liegt nur 0,7 % unter dem besten im Nachhinein gewählten Anteil, weil der S-Learner gut kalibriert ist. Mit den anderen Uplift-Modellen bringt dieselbe Regel 6 – 9 % weniger (2.500 – 2.570 €).
+- Die Gewinnzahlen selbst sind verrauscht (grob ±200 €); der Abstand zwischen S-Learner und Response-Modell liegt in dieser Größenordnung.
+
+**Sensitivität** ([Grafik](reports/figures/policy_sensitivity.png)): Die Entscheidung hängt nur vom Verhältnis Kosten / Wert ab. Steigt es von 0,1 % auf 5 %, sinkt der Anteil, den die Regel anspricht, von 35 % auf 4 %. Ab 0,76 % ist „alle ansprechen“ ein Verlustgeschäft. Bei knappem Budget (Verhältnis 4,4 %) erzielt die S-Learner-Regel das 2,4-Fache des besten Response-Anteils (2.410 vs. 1.005 Visit-Werte pro 1 Mio. Nutzer). Bei sehr günstiger Ausspielung (unter etwa 0,2 %) ist das Response-Ranking gleich gut oder leicht besser.
+
+### Was treibt den Uplift?
+
+Anteil am mittleren |SHAP| je Modell ([Notebook 05](notebooks/05_heterogeneity.ipynb)):
+
+| Merkmal | Response („wer kommt?“) | S-Learner (Uplift) | Causal Forest (Uplift) |
+|---|---|---|---|
+| f3 | 2 % | 24 % | 41 % |
+| f8 | 53 % | 23 % | 26 % |
+| f6 | 5 % | 17 % | 7 % |
+| f9 | 17 % | 15 % | 15 % |
+| f2 | 19 % | 8 % | 6 % |
+
+![SHAP-Werte des Uplifts](reports/figures/shap_uplift.png)
+
+**f3 spielt für „wer kommt?“ kaum eine Rolle, ist aber der wichtigste Treiber für „wer kommt wegen der Werbung?“.** Zwei grundverschiedene Uplift-Modelle (Boosting und Wald) wählen dieselben vier Merkmale. Die Rohdaten bestätigen das Muster:
+
+| f3 (Gruppen) | Anteil Nutzer | Visit-Rate Kontrolle | beobachteter Uplift | Vorhersage S-Learner |
+|---|---|---|---|---|
+| ≤ 0,30 | 3,7 % | 13,3 % | 9,1 Pp. (± 0,6) | 7,3 Pp. |
+| 0,30 – 1,82 | 3,8 % | 9,8 % | 5,0 Pp. | 3,7 Pp. |
+| 1,82 – 2,94 | 4,3 % | 8,3 % | 3,0 Pp. | 2,2 Pp. |
+| 2,94 – 3,91 | 6,3 % | 6,5 % | 1,3 Pp. | 1,2 Pp. |
+| = 4,68 (häufigster Wert) | 81,8 % | 2,8 % | 0,2 Pp. | 0,2 Pp. |
+
+Die 18 % Nutzer mit niedrigem f3 tragen fast die gesamte Wirkung; bei den übrigen 82 % ändert die Werbung kaum etwas.
 
 ## 5. Einschränkungen
 
-- **Anonymisierte Merkmale:** Es lässt sich nicht sagen, *welche Art* von Nutzern gut reagiert, nur *dass* die Modelle sie finden.
+- **Anonymisierte Merkmale:** Es lässt sich nicht sagen, *welche Art* von Nutzern gut reagiert („niedriges f3“), nur *dass* die Modelle sie finden.
 - **Unterabtastung durch Criteo:** Absolute Raten und Effektgrößen sind nicht repräsentativ; belastbar sind Vergleiche zwischen Modellen.
-- **Gepoolte Tests:** Der Treatment-Anteil hängt leicht mit den Merkmalen zusammen (s. Abschnitt 2). Die Qini-Auswertung vergleicht Treatment und Kontrolle innerhalb der Top-k, unterstellt dort aber einen konstanten Treatment-Anteil. Eine Auswertung mit Propensity-Gewichten wäre strenger.
+- **Gepoolte Tests:** Der Treatment-Anteil hängt leicht mit den Merkmalen zusammen (s. Abschnitt 2). Budget und Gewinn sind deshalb mit IPW geschätzt; Qini, Bootstrap und Kalibrierung vergleichen dagegen ungewichtet innerhalb der Top-k bzw. der Gruppen.
+- **Annahmen zu Kosten und Wert** sind frei gewählt; die Sensitivitätsanalyse zeigt, wie sich die Empfehlung mit ihnen ändert.
 - **Kleiner Abstand:** Der Vorsprung gegenüber dem Response-Modell ist gesichert, aber in der Größenordnung von 5 % Qini. Ob er sich lohnt, hängt vom Budget ab.
-- **Bootstrap-Intervalle** erfassen nur die Unsicherheit des Testsets, nicht die des Trainings.
+- **Bootstrap-Intervalle** erfassen nur die Unsicherheit des Testsets, nicht die des Trainings; für die Gewinnzahlen gibt es nur eine grobe Fehlerabschätzung.
+- **SHAP erklärt die Modelle**, nicht direkt die Kausalstruktur; die Gegenprobe mit den Rohdaten stützt aber das Muster für f3.
 - **Teilstichproben:** DR-Learner (2 Mio.) und Causal Forest (1 Mio.) wurden wegen Speicher und Laufzeit nicht auf allen Trainingsdaten angepasst.
 
 ## 6. Reproduktion
@@ -144,7 +197,7 @@ Voraussetzungen: Python 3.11, [uv](https://docs.astral.sh/uv/), ca. 16 GB RAM.
    uv run python scripts/convert_to_parquet.py
    ```
 
-4. Die Notebooks in Reihenfolge ausführen: `01` → `02` → `03` → `04`. Notebook 03 trainiert alle Modelle (ca. 15 Minuten) und speichert die Testvorhersagen nach `data/processed/preds_test.parquet`, die Notebook 04 liest.
+4. Die Notebooks in Reihenfolge ausführen: `01` → `02` → `03` → `04` → `05`. Notebook 03 trainiert alle Modelle (ca. 15 Minuten) und speichert die Testvorhersagen nach `data/processed/preds_test.parquet`, die Notebooks 04 und 05 lesen. Notebook 04 braucht für den Bootstrap ca. 5 Minuten.
 
 ## 7. Projektstand und Struktur
 
@@ -153,8 +206,12 @@ Voraussetzungen: Python 3.11, [uv](https://docs.astral.sh/uv/), ca. 16 GB RAM.
 │   ├── 01_eda_randomization.ipynb   # Überblick, Balance-Check
 │   ├── 02_ate_iv.ipynb              # ATE (naiv und adjustiert), IV-Schätzung
 │   ├── 03_uplift_models.ipynb       # alle Modelle, Vergleich auf dem Testset
-│   └── 04_evaluation_policy.ipynb   # Bootstrap-Intervalle, Kalibrierung
-├── src/uplift/metrics.py            # Qini, AUUC, Uplift@k, Bootstrap, Kalibrierung
+│   ├── 04_evaluation_policy.ipynb   # Bootstrap, Kalibrierung, Budget, Gewinn, Sensitivität
+│   └── 05_heterogeneity.ipynb       # SHAP: Was treibt den Uplift?
+├── src/uplift/
+│   ├── metrics.py                   # Qini, AUUC, Uplift@k, Bootstrap, Kalibrierung
+│   ├── models.py                    # LightGBM-Bausteine, S-/T-/X-Learner, EconML-Modelle
+│   └── policy.py                    # IPW-Schätzung zusätzlicher Visits, Budgetkurve
 ├── scripts/convert_to_parquet.py    # CSV → Parquet
 └── reports/                         # Ergebnistabellen (CSV) und Abbildungen
 ```
@@ -164,9 +221,9 @@ Voraussetzungen: Python 3.11, [uv](https://docs.astral.sh/uv/), ca. 16 GB RAM.
 | Experiment prüfen, ATE und IV | ✅ |
 | 6 Modelle + Zufall auf demselben Testset | ✅ |
 | Qini mit Bootstrap-Intervallen, Kalibrierung | ✅ |
-| Budgetkurve und Sensitivitätsanalyse | offen |
-| Effekttreiber (SHAP) | offen |
-| Logik aus den Notebooks nach `src/` verschieben | offen |
+| Budgetkurve, Ausspielungsregel, Sensitivitätsanalyse | ✅ |
+| Effekttreiber (SHAP) | ✅ |
+| Logik aus den Notebooks nach `src/` verschieben | ✅ |
 
 ## Quelle und Lizenz der Daten
 

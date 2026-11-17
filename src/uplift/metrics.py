@@ -69,6 +69,14 @@ def uplift_at_k(y, w, score, k=0.3):
     return yt[wt == 1].mean() - yt[wt == 0].mean()
 
 
+def uplift_summary(y, w, score, ks=(0.1, 0.2, 0.3)):
+    """Kennzahlen eines Modells auf einen Blick: Qini-AUC, AUUC und Uplift@k."""
+    row = {"qini_auc": qini_auc(y, w, score), "auuc": auuc(y, w, score)}
+    for k in ks:
+        row[f"uplift@{int(k * 100)}%"] = uplift_at_k(y, w, score, k)
+    return row
+
+
 def bootstrap_qini(y, w, scores, n_boot=200, seed=0):
     """Qini-AUC für mehrere Modelle auf n_boot Bootstrap-Stichproben des Testsets.
 
